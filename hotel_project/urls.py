@@ -19,17 +19,22 @@ router.register('sales', SaleViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    
+    # API routes
     path('api/', include(router.urls)),
-    path('api/auth/', include('accounts.urls')),
-    path('api/accounts/', include('accounts.urls')), 
-    path('api/', include('inventory.urls')),
+    
+    # Accounts app (authentication and user management)
+    path('api/auth/', include('accounts.urls')),  # This handles all /api/accounts/* routes
+    
+    # Other app routes
+    path('api/inventory/', include('inventory.urls')),
     path('api/bookings/', include('bookings.urls')), 
     path('api/reports/', include('reports.urls')), 
     path('api/sales/', include('sales.urls')),
     path('api/consumables/', include('consumables.urls')),
-
 ]
-from rest_framework.renderers import JSONRenderer
+
+# DRF Settings
 REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',

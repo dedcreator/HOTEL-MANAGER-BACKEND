@@ -1,3 +1,5 @@
+# backend/inventory/serializers.py
+
 from rest_framework import serializers
 from .models import Product, Batch, StockMovement, StockAlert
 
@@ -20,46 +22,49 @@ class ProductSerializer(serializers.ModelSerializer):
         return False
     
     def validate_name(self, value):
-        """Validate that product name is unique, excluding current instance"""
-        # Check if this is an update (self.instance exists) or create
         if self.instance:
-            # For updates: check if any OTHER product has this name
             if Product.objects.filter(name__iexact=value).exclude(id=self.instance.id).exists():
                 raise serializers.ValidationError("A product with this name already exists")
         else:
-            # For create: check if ANY product has this name
             if Product.objects.filter(name__iexact=value).exists():
                 raise serializers.ValidationError("A product with this name already exists")
         return value
-
-    def validate(self, data):
-        """Additional validation for the entire object"""
-        # Ensure location is set (if your model has it)
-        if 'location' not in data and not self.instance:
-            data['location'] = 'bar'  # Default value
-        
-        return data
 
 
 class BatchSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     received_by_name = serializers.CharField(source='received_by.username', read_only=True)
+    received_by_full_name = serializers.SerializerMethodField()
     
     class Meta:
         model = Batch
         fields = '__all__'
         read_only_fields = ['date_received']
+    
+    def get_received_by_full_name(self, obj):
+        if obj.received_by:
+            return f"{obj.received_by.get_full_name() or obj.received_by.username}"
+        return "System"
 
 
 class StockMovementSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    created_by_full_name = serializers.SerializerMethodField()
     movement_type_display = serializers.CharField(source='get_movement_type_display', read_only=True)
     
     class Meta:
         model = StockMovement
-        fields = '__all__'
-
+        fields = [
+            'id', 'product', 'product_name', 'batch', 'quantity', 
+            'movement_type', 'movement_type_display', 'price_at_movement',
+            'notes', 'created_at', 'created_by', 'created_by_name', 'created_by_full_name'
+        ]
+    
+    def get_created_by_full_name(self, obj):
+        if obj.created_by:
+            return f"{obj.created_by.get_full_name() or obj.created_by.username}"
+        return "System"
 
 class StockAlertSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
@@ -73,7 +78,7 @@ class SimpleProductSerializer(serializers.ModelSerializer):
     """Simplified product serializer for dropdowns"""
     class Meta:
         model = Product
-        fields = ['id', 'name', 'category', 'default_price', 'total_stock', 'is_low_stock']
+        fields = ['id', 'name', 'category', 'default_price', 'total_stock', 'is_low_stock', 'location', 'is_premium']
 
 
 class AddStockSerializer(serializers.Serializer):
@@ -84,8 +89,3 @@ class AddStockSerializer(serializers.Serializer):
     supplier = serializers.CharField(required=False, allow_blank=True)
     batch_number = serializers.CharField(required=False, allow_blank=True)
     notes = serializers.CharField(required=False, allow_blank=True)
-    
-    def validate(self, data):
-        if 'selling_price' not in data or data['selling_price'] is None:
-            data['selling_price'] = None
-        return data

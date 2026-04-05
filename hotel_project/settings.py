@@ -113,6 +113,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Custom user model
 AUTH_USER_MODEL = 'accounts.User'
 
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
+
 # JWT Settings
 from datetime import timedelta
 
@@ -131,11 +133,16 @@ REST_FRAMEWORK = {
     ],
 }
 
+# JWT Settings - Increase token lifetimes
+from datetime import timedelta
+
+# backend/hotel_project/settings.py
+
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=30),  
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=60), 
     'ROTATE_REFRESH_TOKENS': False,
-    'BLACKLIST_AFTER_ROTATION': True,
+    'BLACKLIST_AFTER_ROTATION': False,
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
     'VERIFYING_KEY': None,
@@ -220,3 +227,15 @@ SERVER_EMAIL = 'errors@tsghotel.com.ng'
 # Optional but recommended - store API key in environment variable
 import os
 BREVO_API_KEY = os.environ.get('BREVO_API_KEY', 'your-api-key-here')
+
+# Email settings (development)
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# For production, use:
+# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+# EMAIL_HOST = 'smtp.gmail.com'
+# EMAIL_PORT = 587
+# EMAIL_USE_TLS = True
+# EMAIL_HOST_USER = 'your-email@gmail.com'
+# EMAIL_HOST_PASSWORD = 'your-app-password'
+# DEFAULT_FROM_EMAIL = 'Hotel Manager <noreply@hotelmanager.com>'

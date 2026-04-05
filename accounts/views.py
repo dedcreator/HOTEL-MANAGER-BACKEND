@@ -1,5 +1,3 @@
-# backend/accounts/views.py
-
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -12,13 +10,21 @@ from django.contrib.auth import authenticate, login as django_login, logout as d
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
+from django.conf import settings
 from datetime import timedelta
 import json
 import datetime
-from .models import User
-from .serializers import UserSerializer, CreateUserSerializer, UpdateUserSerializer
+from .models import User, PasswordResetToken
+from .serializers import (
+    UserSerializer, CreateUserSerializer, UpdateUserSerializer,
+    ForgotPasswordSerializer, VerifyResetTokenSerializer, ResetPasswordSerializer
+)
 from sales.models import Sale
 from bookings.models import Booking
+from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 
 # ============= FUNCTION-BASED VIEWS =============
 
@@ -27,66 +33,50 @@ def login(request):
     """Login view that returns both token and JWT"""
     if request.method == 'POST':
         try:
-            # Try to parse JSON body
-            try:
-                data = json.loads(request.body)
-            except json.JSONDecodeError:
-                return JsonResponse({'error': 'Invalid JSON format'}, status=400)
-            
+            data = json.loads(request.body)
             username = data.get('username')
             password = data.get('password')
             
             if not username or not password:
                 return JsonResponse({'error': 'Username and password required'}, status=400)
             
-            # Authenticate user
             user = authenticate(username=username, password=password)
             
-            if user is not None:
-                if user.is_active:
-                    # Log the user in (for session auth)
-                    django_login(request, user)
-                    
-                    # Get or create token (for DRF Token Auth)
-                    token, created = Token.objects.get_or_create(user=user)
-                    
-                    # Create JWT token (for Simple JWT)
-                    refresh = RefreshToken.for_user(user)
-                    
-                    # Get user data
-                    user_data = {
-                        'id': user.id,
-                        'username': user.username,
-                        'email': user.email,
-                        'first_name': user.first_name,
-                        'last_name': user.last_name,
-                        'full_name': user.get_full_name(),
-                        'role': user.role,
-                        'phone': user.phone,
-                        'is_active': user.is_active,
-                        'date_joined': user.date_joined.isoformat() if hasattr(user, 'date_joined') else None
-                    }
-                    
-                    return JsonResponse({
-                        'token': token.key,  # For Token Authentication
-                        'access': str(refresh.access_token),  # For JWT Authentication
-                        'refresh': str(refresh),  # For refreshing JWT
-                        'user': user_data
-                    })
-                else:
-                    return JsonResponse({'error': 'Account is disabled'}, status=400)
+            if user is not None and user.is_active:
+                django_login(request, user)
+                
+                # Create JWT tokens
+                refresh = RefreshToken.for_user(user)
+                
+                # Get or create token for DRF Token Auth
+                token, created = Token.objects.get_or_create(user=user)
+                
+                user_data = {
+                    'id': str(user.id),
+                    'username': user.username,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'full_name': user.get_full_name(),
+                    'role': user.role,
+                    'phone': user.phone,
+                    'is_active': user.is_active,
+                }
+                
+                return JsonResponse({
+                    'access': str(refresh.access_token),
+                    'refresh': str(refresh),
+                    'token': token.key,
+                    'user': user_data
+                })
             else:
                 return JsonResponse({'error': 'Invalid credentials'}, status=400)
                 
         except Exception as e:
-            # Log the error for debugging
             print(f"Login error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return JsonResponse({'error': 'Server error: ' + str(e)}, status=500)
+            return JsonResponse({'error': 'Server error'}, status=500)
     
     return JsonResponse({'error': 'Method not allowed'}, status=405)
-
 
 @csrf_exempt
 def logout(request):
@@ -141,6 +131,208 @@ def register(request):
                 return JsonResponse({'errors': serializer.errors}, status=400)
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
+    
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+# ============= PASSWORD RESET VIEWS =============
+
+@csrf_exempt
+def forgot_password(request):
+    """Send password reset email"""
+    if request.method == 'POST':
+        try:
+            # Parse JSON body
+            try:
+                data = json.loads(request.body)
+            except json.JSONDecodeError:
+                return JsonResponse({'error': 'Invalid JSON format'}, status=400)
+            
+            serializer = ForgotPasswordSerializer(data=data)
+            
+            if serializer.is_valid():
+                email = serializer.validated_data['email']
+                user = User.objects.get(email=email)
+                
+                # Delete old unused tokens for this user
+                PasswordResetToken.objects.filter(user=user, used=False).delete()
+                
+                # Create new token (expires in 24 hours)
+                token = PasswordResetToken.objects.create(
+                    user=user,
+                    email=email,
+                    expires_at=timezone.now() + timedelta(hours=24)
+                )
+                
+                # Build reset link
+                reset_link = f"{settings.FRONTEND_URL}/reset-password?token={token.token}"
+                
+                # Send email
+                try:
+                    email_subject = "Reset Your Hotel Manager Password"
+                    email_message = f"""
+Hello {user.get_full_name() or user.username},
+
+You requested to reset your password for your Hotel Manager account.
+
+Click the link below to reset your password:
+{reset_link}
+
+This link will expire in 24 hours.
+
+If you didn't request this, please ignore this email.
+
+Best regards,
+Hotel Manager Team
+"""
+                    
+                    send_mail(
+                        email_subject,
+                        email_message,
+                        settings.DEFAULT_FROM_EMAIL,
+                        [email],
+                        fail_silently=False,
+                    )
+                    
+                    return JsonResponse({
+                        "message": "Password reset link has been sent to your email",
+                        "email": email
+                    }, status=200)
+                    
+                except Exception as e:
+                    print(f"Email sending failed: {e}")
+                    return JsonResponse({
+                        "error": "Failed to send email. Please try again later."
+                    }, status=500)
+            
+            return JsonResponse(serializer.errors, status=400)
+            
+        except Exception as e:
+            print(f"Forgot password error: {str(e)}")
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+
+@csrf_exempt
+def verify_reset_token(request):
+    """Verify if reset token is valid"""
+    if request.method == 'POST':
+        try:
+            try:
+                data = json.loads(request.body)
+            except json.JSONDecodeError:
+                return JsonResponse({'error': 'Invalid JSON format'}, status=400)
+            
+            serializer = VerifyResetTokenSerializer(data=data)
+            
+            if serializer.is_valid():
+                token_uuid = serializer.validated_data['token']
+                try:
+                    token = PasswordResetToken.objects.get(token=token_uuid)
+                    if token.is_valid():
+                        return JsonResponse({
+                            "valid": True,
+                            "email": token.email,
+                            "message": "Token is valid"
+                        }, status=200)
+                    else:
+                        return JsonResponse({
+                            "valid": False,
+                            "message": "This reset link has expired"
+                        }, status=400)
+                except PasswordResetToken.DoesNotExist:
+                    return JsonResponse({
+                        "valid": False,
+                        "message": "Invalid reset token"
+                    }, status=400)
+            
+            return JsonResponse({
+                "valid": False,
+                "message": serializer.errors.get('token', ['Invalid token'])[0]
+            }, status=400)
+            
+        except Exception as e:
+            print(f"Verify token error: {str(e)}")
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+@csrf_exempt
+def reset_password(request):
+    """Reset password using valid token"""
+    if request.method == 'POST':
+        try:
+            try:
+                data = json.loads(request.body)
+                print(f"Reset password data received: {data}")
+            except json.JSONDecodeError as e:
+                return JsonResponse({'error': 'Invalid JSON format'}, status=400)
+            
+            # Manually validate passwords match first
+            new_password = data.get('new_password')
+            confirm_password = data.get('confirm_password')
+            
+            if not new_password or not confirm_password:
+                return JsonResponse({'error': 'Both password fields are required'}, status=400)
+            
+            if new_password != confirm_password:
+                return JsonResponse({'error': 'Passwords do not match'}, status=400)
+            
+            # Validate password strength
+            from django.contrib.auth.password_validation import validate_password
+            from django.core.exceptions import ValidationError
+            
+            try:
+                validate_password(new_password)
+            except ValidationError as e:
+                return JsonResponse({'error': ' '.join(e.messages)}, status=400)
+            
+            # Now validate with serializer
+            serializer = ResetPasswordSerializer(data=data)
+            
+            if serializer.is_valid():
+                token_uuid = serializer.validated_data['token']
+                new_password = serializer.validated_data['new_password']
+                
+                try:
+                    token = PasswordResetToken.objects.get(token=token_uuid)
+                    
+                    # Check token validity
+                    if not token.is_valid():
+                        return JsonResponse({
+                            "error": "This reset link has expired"
+                        }, status=400)
+                    
+                    # Reset password
+                    user = token.user
+                    user.set_password(new_password)
+                    user.save()
+                    
+                    # Mark token as used
+                    token.used = True
+                    token.save()
+                    
+                    # Delete auth tokens to force re-login
+                    Token.objects.filter(user=user).delete()
+                    
+                    return JsonResponse({
+                        "message": "Password has been reset successfully. You can now login with your new password."
+                    }, status=200)
+                    
+                except PasswordResetToken.DoesNotExist:
+                    return JsonResponse({
+                        "error": "Invalid reset token"
+                    }, status=400)
+            else:
+                # Return the specific validation errors
+                return JsonResponse(serializer.errors, status=400)
+            
+        except Exception as e:
+            print(f"Reset password error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return JsonResponse({'error': str(e)}, status=500)
     
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
@@ -527,3 +719,146 @@ class StaffViewSet(viewsets.ModelViewSet):
             ])
         
         return response
+@csrf_exempt
+def update_profile(request):
+    """Update user profile with password verification for sensitive changes"""
+    if request.method != 'PUT' and request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    
+    # Check authentication via JWT token
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    
+    # Get user from token (you need to verify the JWT token)
+    # For now, use request.user if session auth is working
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    
+    try:
+        data = json.loads(request.body)
+        user = request.user
+        
+        print(f"Updating profile for user: {user.username}")
+        print(f"Update data: {data}")
+        
+        # Update basic info (no password needed)
+        if 'first_name' in data:
+            user.first_name = data['first_name']
+        if 'last_name' in data:
+            user.last_name = data['last_name']
+        
+        # Sensitive changes require password verification
+        email_changed = 'email' in data and data['email'] != user.email
+        username_changed = 'username' in data and data['username'] != user.username
+        
+        if email_changed or username_changed:
+            password = data.get('password')
+            if not password:
+                return JsonResponse({'error': 'Password required for email/username change'}, status=400)
+            
+            # Verify password
+            from django.contrib.auth import authenticate
+            auth_user = authenticate(username=user.username, password=password)
+            if not auth_user:
+                return JsonResponse({'error': 'Invalid password'}, status=401)
+            
+            if email_changed:
+                # Check if email is already taken
+                if User.objects.filter(email=data['email']).exclude(id=user.id).exists():
+                    return JsonResponse({'error': 'Email already exists'}, status=400)
+                user.email = data['email']
+            
+            if username_changed:
+                # Check if username is already taken
+                if User.objects.filter(username=data['username']).exclude(id=user.id).exists():
+                    return JsonResponse({'error': 'Username already exists'}, status=400)
+                user.username = data['username']
+        
+        user.save()
+        
+        return JsonResponse({
+            'message': 'Profile updated successfully',
+            'user': {
+                'id': str(user.id),
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'role': user.role,
+                'phone': user.phone,
+            }
+        }, status=200)
+        
+    except Exception as e:
+        print(f"Update profile error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+def change_password(request):
+    """Change user password with current password verification"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    
+    # Check authentication
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Not authenticated'}, status=401)
+    
+    try:
+        data = json.loads(request.body)
+        user = request.user
+        
+        print(f"Changing password for user: {user.username}")
+        
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+        
+        if not current_password or not new_password:
+            return JsonResponse({'error': 'Current password and new password required'}, status=400)
+        
+        # Verify current password
+        from django.contrib.auth import authenticate
+        if not authenticate(username=user.username, password=current_password):
+            return JsonResponse({'error': 'Current password is incorrect'}, status=401)
+        
+        # Validate new password
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError
+        
+        try:
+            validate_password(new_password, user)
+        except ValidationError as e:
+            return JsonResponse({'error': ' '.join(e.messages)}, status=400)
+        
+        # Change password
+        user.set_password(new_password)
+        user.save()
+        
+        # Delete all auth tokens to force re-login
+        from rest_framework.authtoken.models import Token
+        Token.objects.filter(user=user).delete()
+        
+        return JsonResponse({'message': 'Password changed successfully. Please login again.'}, status=200)
+        
+    except Exception as e:
+        print(f"Change password error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': str(e)}, status=500)
+    
+
+class CustomTokenRefreshView(TokenRefreshView):
+    """Custom token refresh view with better error handling"""
+    
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0])
+        
+        return Response(serializer.validated_data, status=status.HTTP_200_OK)

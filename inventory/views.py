@@ -1,3 +1,4 @@
+# backend/inventory/views.py
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -30,6 +31,23 @@ class ProductViewSet(viewsets.ModelViewSet):
         # Soft delete - just mark as inactive
         instance.is_active = False
         instance.save()
+    
+    def destroy(self, request, *args, **kwargs):
+        """Override destroy to return proper response and only CEO can delete"""
+        instance = self.get_object()
+        
+        # Check if user is CEO
+        if request.user.role != 'ceo':
+            return Response(
+                {'error': 'Only CEO can delete products'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        self.perform_destroy(instance)
+        return Response(
+            {'message': 'Product deleted successfully'},
+            status=status.HTTP_200_OK
+        )
 
     def get_permissions(self):
         """Only CEO can delete products"""
@@ -38,7 +56,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
     
     def get_queryset(self):
-        queryset = Product.objects.all()
+        queryset = Product.objects.filter(is_active=True)
         
         # Filter by category
         category = self.request.query_params.get('category')
@@ -52,22 +70,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                 Q(name__icontains=search) | Q(barcode__icontains=search)
             )
         
-        # Filter active products
-        active = self.request.query_params.get('active')
-        if active is not None:
-            is_active = active.lower() == 'true'
-            queryset = queryset.filter(is_active=is_active)
-        
         # Filter by location (bar/lounge/both)
         location = self.request.query_params.get('location')
         if location:
             queryset = queryset.filter(location=location)
-        
-        # Low stock filter (client-side)
-        low_stock = self.request.query_params.get('low_stock')
-        if low_stock and low_stock.lower() == 'true':
-            product_list = list(queryset)
-            queryset = [p for p in product_list if p.is_low_stock]
         
         return queryset
     
@@ -121,18 +127,18 @@ class ProductViewSet(viewsets.ModelViewSet):
             supplier=data.get('supplier', ''),
             batch_number=data.get('batch_number', ''),
             notes=data.get('notes', ''),
-            received_by=request.user
+            received_by=request.user  # This captures the user who added stock
         )
         
-        # Record movement
+        # Record movement with the user who added stock
         StockMovement.objects.create(
             product=product,
             batch=batch,
             quantity=data['quantity'],
             movement_type='restock',
             price_at_movement=data.get('selling_price', product.default_price),
-            created_by=request.user,
-            notes=f"Restocked: {data['quantity']} units"
+            created_by=request.user,  # This captures the user
+            notes=f"Restocked: {data['quantity']} units by {request.user.get_full_name() or request.user.username}"
         )
         
         # Resolve any low stock alerts
@@ -145,8 +151,11 @@ class ProductViewSet(viewsets.ModelViewSet):
                 resolved_at=timezone.now()
             )
         
-        return Response(BatchSerializer(batch).data, status=status.HTTP_201_CREATED)
-    
+        return Response({
+            'message': f'Successfully added {data["quantity"]} units',
+            'batch': BatchSerializer(batch).data,
+            'movement': StockMovementSerializer(StockMovement.objects.filter(batch=batch).first()).data
+        }, status=status.HTTP_201_CREATED)
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
         """Get stock movement history"""

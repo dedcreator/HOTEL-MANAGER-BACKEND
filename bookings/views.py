@@ -336,3 +336,4 @@ class BookingViewSet(viewsets.ModelViewSet):
             'today_arrivals': today_arrivals,
             'today_departures': today_departures,
         })
+    
