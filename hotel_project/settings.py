@@ -206,6 +206,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://172.20.10.4:3000",
+    "loca",
 ]
 
 # ====== EMAIL CONFIGURATION (BREVO) ======
