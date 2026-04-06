@@ -109,7 +109,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def add_stock(self, request, pk=None):
-        """Add stock to a product"""
         product = self.get_object()
         
         serializer = AddStockSerializer(data=request.data)
@@ -122,69 +121,71 @@ class ProductViewSet(viewsets.ModelViewSet):
         batch = Batch.objects.create(
             product=product,
             quantity=data['quantity'],
+            remaining_quantity=data['quantity'],
             cost_price=data.get('cost_price'),
             selling_price=data.get('selling_price', product.default_price),
             supplier=data.get('supplier', ''),
             batch_number=data.get('batch_number', ''),
             notes=data.get('notes', ''),
-            received_by=request.user  # This captures the user who added stock
+            received_by=request.user
         )
         
-        # Record movement with the user who added stock
+        # Update product total_stock (database field)
+        product.total_stock += data['quantity']
+        product.save()
+        
+        # Record movement
         StockMovement.objects.create(
             product=product,
             batch=batch,
             quantity=data['quantity'],
             movement_type='restock',
             price_at_movement=data.get('selling_price', product.default_price),
-            created_by=request.user,  # This captures the user
-            notes=f"Restocked: {data['quantity']} units by {request.user.get_full_name() or request.user.username}"
+            created_by=request.user,
+            notes=f"Restocked: {data['quantity']} units"
         )
         
         # Resolve any low stock alerts
-        if not product.is_low_stock:
+        if product.total_stock > product.min_stock_level:
             StockAlert.objects.filter(
                 product=product,
                 is_resolved=False
             ).update(
                 is_resolved=True,
-                resolved_at=timezone.now()
+                resolved_at=timezone.now(),
+                resolved_by=request.user
             )
         
-        return Response({
-            'message': f'Successfully added {data["quantity"]} units',
-            'batch': BatchSerializer(batch).data,
-            'movement': StockMovementSerializer(StockMovement.objects.filter(batch=batch).first()).data
-        }, status=status.HTTP_201_CREATED)
+        return Response(BatchSerializer(batch).data, status=status.HTTP_201_CREATED)
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
-        """Get stock movement history"""
-        product = self.get_object()
-        
-        days = int(request.query_params.get('days', 30))
-        start_date = timezone.now() - timedelta(days=days)
-        
-        movements = StockMovement.objects.filter(
-            product=product,
-            created_at__gte=start_date
-        ).order_by('-created_at')
-        
-        batches = Batch.objects.filter(
-            product=product,
-            quantity__gt=0
-        ).order_by('-date_received')
-        
-        return Response({
-            'product': {
-                'id': product.id,
-                'name': product.name,
-                'total_stock': product.total_stock,
-                'min_stock_level': product.min_stock_level,
-                'is_low_stock': product.is_low_stock
-            },
-            'movements': StockMovementSerializer(movements, many=True).data,
-            'active_batches': BatchSerializer(batches, many=True).data
-        })
+            """Get stock movement history"""
+            product = self.get_object()
+            
+            days = int(request.query_params.get('days', 30))
+            start_date = timezone.now() - timedelta(days=days)
+            
+            movements = StockMovement.objects.filter(
+                product=product,
+                created_at__gte=start_date
+            ).order_by('-created_at')
+            
+            batches = Batch.objects.filter(
+                product=product,
+                quantity__gt=0
+            ).order_by('-date_received')
+            
+            return Response({
+                'product': {
+                    'id': product.id,
+                    'name': product.name,
+                    'total_stock': product.total_stock,
+                    'min_stock_level': product.min_stock_level,
+                    'is_low_stock': product.is_low_stock
+                },
+                'movements': StockMovementSerializer(movements, many=True).data,
+                'active_batches': BatchSerializer(batches, many=True).data
+            })
 
 
 class BatchViewSet(viewsets.ModelViewSet):

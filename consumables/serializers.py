@@ -1,5 +1,6 @@
 # backend/consumables/serializers.py
 from rest_framework import serializers
+from django.db import models 
 from .models import ExpenseCategory, Expense, ExpenseAttachment
 
 class ExpenseCategorySerializer(serializers.ModelSerializer):
@@ -14,7 +15,8 @@ class ExpenseCategorySerializer(serializers.ModelSerializer):
         return obj.expenses.count()
     
     def get_total_amount(self, obj):
-        return obj.expenses.aggregate(total=models.Sum('amount'))['total'] or 0
+        total = obj.expenses.aggregate(total=models.Sum('amount'))['total']
+        return float(total) if total else 0
 
 class ExpenseSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
@@ -31,15 +33,15 @@ class ExpenseSerializer(serializers.ModelSerializer):
     def get_can_edit(self, obj):
         request = self.context.get('request')
         if request and request.user:
-            # Managers and CEO can edit
-            return request.user.role in ['manager', 'ceo']
+            # Managers and CEO can edit (using uppercase)
+            return request.user.role in ['MANAGER', 'CEO']
         return False
     
     def get_can_delete(self, obj):
         request = self.context.get('request')
         if request and request.user:
             # Only CEO can delete
-            return request.user.role == 'ceo'
+            return request.user.role == 'CEO'
         return False
 
 class ExpenseCreateSerializer(serializers.ModelSerializer):

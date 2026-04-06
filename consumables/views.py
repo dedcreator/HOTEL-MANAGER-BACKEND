@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from django.db.models import Q, Sum, Count
 from django.utils import timezone
 from datetime import timedelta
+from decimal import Decimal
 from .models import ExpenseCategory, Expense, ExpenseAttachment
 from .serializers import (
     ExpenseCategorySerializer, ExpenseSerializer, 
@@ -13,14 +14,21 @@ from .serializers import (
 )
 
 class IsManagerOrCEO(permissions.BasePermission):
-    """Allow access only to managers and CEO"""
+    """Allow access only to managers and CEO (case-insensitive)"""
     def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role in ['manager', 'ceo']
+        if not request.user.is_authenticated:
+            return False
+        # Convert role to uppercase for comparison
+        role = request.user.role.upper() if request.user.role else ''
+        return role in ['MANAGER', 'CEO']
 
 class IsCEO(permissions.BasePermission):
-    """Allow access only to CEO"""
+    """Allow access only to CEO (case-insensitive)"""
     def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role == 'ceo'
+        if not request.user.is_authenticated:
+            return False
+        role = request.user.role.upper() if request.user.role else ''
+        return role == 'CEO'
 
 class ExpenseCategoryViewSet(viewsets.ModelViewSet):
     queryset = ExpenseCategory.objects.all().order_by('name')
@@ -86,33 +94,73 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def summary(self, request):
         """Get expense summary statistics"""
-        total_expenses = Expense.objects.aggregate(total=Sum('amount'))['total'] or 0
-        expense_count = Expense.objects.count()
+        # Get date range (default: last 30 days)
+        days = int(request.query_params.get('days', 30))
+        start_date = timezone.now().date() - timedelta(days=days)
         
-        # Expenses by category
-        by_category = Expense.objects.values(
+        # Total expenses (last 30 days)
+        total_expenses = Expense.objects.filter(
+            expense_date__gte=start_date
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        
+        # Expense count (last 30 days)
+        expense_count = Expense.objects.filter(
+            expense_date__gte=start_date
+        ).count()
+        
+        # Expenses by category (last 30 days)
+        by_category = Expense.objects.filter(
+            expense_date__gte=start_date
+        ).values(
             'category__name', 'category__id'
         ).annotate(
             total=Sum('amount'),
             count=Count('id')
         ).order_by('-total')
         
+        # Convert Decimal to float for JSON serialization
+        category_list = []
+        for item in by_category:
+            category_list.append({
+                'category': item['category__id'],
+                'category_name': item['category__name'],
+                'total': float(item['total']) if item['total'] else 0,
+                'count': item['count']
+            })
+        
         # Expenses by month (last 6 months)
         six_months_ago = timezone.now().date() - timedelta(days=180)
-        by_month = Expense.objects.filter(
-            expense_date__gte=six_months_ago
-        ).extra(
-            {'month': "strftime('%Y-%m', expense_date)"}
-        ).values('month').annotate(
-            total=Sum('amount'),
-            count=Count('id')
-        ).order_by('month')
+        expenses = Expense.objects.filter(expense_date__gte=six_months_ago).order_by('expense_date')
+        
+        by_month_dict = {}
+        for expense in expenses:
+            month_key = expense.expense_date.strftime('%Y-%m')
+            month_name = expense.expense_date.strftime('%B %Y')
+            if month_key not in by_month_dict:
+                by_month_dict[month_key] = {
+                    'month': month_key,
+                    'month_name': month_name,
+                    'total': 0,
+                    'count': 0
+                }
+            by_month_dict[month_key]['total'] += float(expense.amount)
+            by_month_dict[month_key]['count'] += 1
+        
+        by_month_list = sorted(by_month_dict.values(), key=lambda x: x['month'])
+        
+        # Get this month's total
+        today = timezone.now().date()
+        this_month_start = today.replace(day=1)
+        this_month_total = Expense.objects.filter(
+            expense_date__gte=this_month_start
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
         
         return Response({
-            'total_expenses': total_expenses,
+            'total_expenses': float(total_expenses),
             'expense_count': expense_count,
-            'by_category': by_category,
-            'by_month': by_month,
+            'this_month_total': float(this_month_total),
+            'by_category': category_list,
+            'by_month': by_month_list,
         })
     
     @action(detail=False, methods=['get'])

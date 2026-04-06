@@ -58,7 +58,7 @@ def login(request):
                     'first_name': user.first_name,
                     'last_name': user.last_name,
                     'full_name': user.get_full_name(),
-                    'role': user.role,
+                    'role': user.role.upper(),
                     'phone': user.phone,
                     'is_active': user.is_active,
                 }
@@ -100,13 +100,36 @@ def logout(request):
 def me(request):
     """Get current user info"""
     if request.method == 'GET':
+        # Try JWT token from Authorization header
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            try:
+                from rest_framework_simplejwt.tokens import AccessToken
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                
+                access_token = AccessToken(token)
+                user_id = access_token['user_id']
+                user = User.objects.get(id=user_id)
+                
+                if not user.is_active:
+                    return JsonResponse({'error': 'User is inactive'}, status=401)
+                
+                serializer = UserSerializer(user)
+                return JsonResponse(serializer.data)
+            except Exception as e:
+                print(f"JWT validation error: {str(e)}")
+                return JsonResponse({'error': 'Invalid or expired token'}, status=401)
+        
+        # Fallback to session auth
         if request.user.is_authenticated:
             serializer = UserSerializer(request.user)
             return JsonResponse(serializer.data)
+        
         return JsonResponse({'error': 'Not authenticated'}, status=401)
     
     return JsonResponse({'error': 'Method not allowed'}, status=405)
-
 
 @csrf_exempt
 def register(request):

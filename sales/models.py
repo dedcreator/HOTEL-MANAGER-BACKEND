@@ -3,6 +3,7 @@ from django.db import models
 from django.db.models import Sum
 from django.conf import settings
 import uuid
+from decimal import Decimal
 from inventory.models import Product
 from rooms.models import Room
 
@@ -40,7 +41,6 @@ class Sale(models.Model):
     
     def save(self, *args, **kwargs):
         if not self.transaction_number:
-            # Generate transaction number: POS-202400001
             import datetime
             today = datetime.date.today()
             year = today.strftime('%Y')
@@ -73,38 +73,51 @@ class SaleItem(models.Model):
     subtotal = models.DecimalField(max_digits=10, decimal_places=2)
     
     def save(self, *args, **kwargs):
-        self.subtotal = (self.quantity * self.unit_price) - self.discount
+        from decimal import Decimal
+        
+        # Calculate subtotal
+        quantity = Decimal(str(self.quantity))
+        unit_price = Decimal(str(self.unit_price))
+        discount = Decimal(str(self.discount))
+        self.subtotal = (quantity * unit_price) - discount
+        
+        # Save the item first
         super().save(*args, **kwargs)
         
         # Update sale totals
         sale = self.sale
         items = sale.items.all()
-        sale.subtotal = items.aggregate(total=Sum('subtotal'))['total'] or 0
-        sale.tax = sale.subtotal * 0.075  # 7.5% VAT
-        sale.total_amount = sale.subtotal + sale.tax - sale.discount
+        
+        # Recalculate sale totals
+        subtotal = sum(Decimal(str(item.subtotal)) for item in items)
+        sale.subtotal = subtotal
+        sale.tax = (subtotal * Decimal('0.075')).quantize(Decimal('0.01'))
+        sale.total_amount = (subtotal + sale.tax - Decimal(str(sale.discount))).quantize(Decimal('0.01'))
         sale.save()
         
-        # Update stock
-        self.product.current_stock -= self.quantity
+        # Update product stock
+        self.product.total_stock -= self.quantity
         self.product.save()
         
         # Record stock movement
-        from inventory.models import StockMovement
-        StockMovement.objects.create(
-            product=self.product,
-            quantity=-self.quantity,
-            movement_type='sale',
-            price_at_movement=self.unit_price,
-            notes=f"Sale {self.sale.transaction_number}",
-            created_by=self.sale.staff
-        )
+        try:
+            from inventory.models import StockMovement
+            StockMovement.objects.create(
+                product=self.product,
+                quantity=-self.quantity,
+                movement_type='sale',
+                price_at_movement=self.unit_price,
+                notes=f"Sale {self.sale.transaction_number}",
+                created_by=self.sale.staff
+            )
+        except Exception as e:
+            # Log but don't fail the sale
+            print(f"Stock movement error: {e}")
     
     def __str__(self):
         return f"{self.product.name} x{self.quantity}"
 
-
 class Customer(models.Model):
-    """Store customer information for repeat customers"""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
@@ -124,10 +137,9 @@ class Customer(models.Model):
         ordering = ['-created_at']
 
 class SavedCart(models.Model):
-    """Save carts for customers to complete later"""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='saved_carts')
-    cart_data = models.JSONField()  # Store cart items as JSON
+    cart_data = models.JSONField()
     subtotal = models.DecimalField(max_digits=10, decimal_places=2)
     tax = models.DecimalField(max_digits=10, decimal_places=2)
     total = models.DecimalField(max_digits=10, decimal_places=2)
@@ -141,7 +153,3 @@ class SavedCart(models.Model):
     
     class Meta:
         ordering = ['-created_at']
-
-# Update Sale model to link to Customer
-# Add this field to your existing Sale model:
-customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name='sales')
