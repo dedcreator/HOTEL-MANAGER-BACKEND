@@ -15,9 +15,13 @@ from .serializers import (
 
 
 class IsCEO(permissions.BasePermission):
-    """CEO-only permission"""
+    """CEO-only permission - case insensitive"""
     def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.role == 'ceo'
+        if not request.user.is_authenticated:
+            return False
+        # Convert role to uppercase for comparison
+        role = request.user.role.upper() if request.user.role else ''
+        return role == 'CEO'
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -36,8 +40,9 @@ class ProductViewSet(viewsets.ModelViewSet):
         """Override destroy to return proper response and only CEO can delete"""
         instance = self.get_object()
         
-        # Check if user is CEO
-        if request.user.role != 'ceo':
+        # Check if user is CEO (case insensitive)
+        user_role = request.user.role.upper() if request.user.role else ''
+        if user_role != 'CEO':
             return Response(
                 {'error': 'Only CEO can delete products'},
                 status=status.HTTP_403_FORBIDDEN
@@ -109,6 +114,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def add_stock(self, request, pk=None):
+        """Add stock to a product"""
         product = self.get_object()
         
         serializer = AddStockSerializer(data=request.data)
@@ -157,35 +163,36 @@ class ProductViewSet(viewsets.ModelViewSet):
             )
         
         return Response(BatchSerializer(batch).data, status=status.HTTP_201_CREATED)
+    
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
-            """Get stock movement history"""
-            product = self.get_object()
-            
-            days = int(request.query_params.get('days', 30))
-            start_date = timezone.now() - timedelta(days=days)
-            
-            movements = StockMovement.objects.filter(
-                product=product,
-                created_at__gte=start_date
-            ).order_by('-created_at')
-            
-            batches = Batch.objects.filter(
-                product=product,
-                quantity__gt=0
-            ).order_by('-date_received')
-            
-            return Response({
-                'product': {
-                    'id': product.id,
-                    'name': product.name,
-                    'total_stock': product.total_stock,
-                    'min_stock_level': product.min_stock_level,
-                    'is_low_stock': product.is_low_stock
-                },
-                'movements': StockMovementSerializer(movements, many=True).data,
-                'active_batches': BatchSerializer(batches, many=True).data
-            })
+        """Get stock movement history"""
+        product = self.get_object()
+        
+        days = int(request.query_params.get('days', 30))
+        start_date = timezone.now() - timedelta(days=days)
+        
+        movements = StockMovement.objects.filter(
+            product=product,
+            created_at__gte=start_date
+        ).order_by('-created_at')
+        
+        batches = Batch.objects.filter(
+            product=product,
+            quantity__gt=0
+        ).order_by('-date_received')
+        
+        return Response({
+            'product': {
+                'id': product.id,
+                'name': product.name,
+                'total_stock': product.total_stock,
+                'min_stock_level': product.min_stock_level,
+                'is_low_stock': product.is_low_stock
+            },
+            'movements': StockMovementSerializer(movements, many=True).data,
+            'active_batches': BatchSerializer(batches, many=True).data
+        })
 
 
 class BatchViewSet(viewsets.ModelViewSet):
