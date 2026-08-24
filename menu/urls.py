@@ -22,6 +22,9 @@ urlpatterns = [
     path('public/categories/', public_categories, name='menu-public-categories'),
     path('public/items/', public_items, name='menu-public-items'),
     path('public/tables/', public_tables, name='menu-public-tables'),
+    path('public/tables/tables/', public_tables, name='menu-public-tables-tables'),
+    path('public/', public_tables, name='menu-public-tables-root'),
+    path('tables/public/', public_tables, name='tables-public'),
     
     # Viewset endpoints
     path('', include(router.urls)),
