@@ -32,6 +32,8 @@ urlpatterns = [
     path('api/reports/', include('reports.urls')), 
     path('api/sales/', include('sales.urls')),
     path('api/consumables/', include('consumables.urls')),
+    path('api/menu/', include('menu.urls')),
+    path('api/tables/', include('menu.urls')),
 ]
 
 # DRF Settings

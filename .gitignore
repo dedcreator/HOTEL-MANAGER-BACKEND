@@ -1,2 +1,49 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Local SQLite Database (Never commit database to git)
 *.sqlite3
 db.sqlite3
+db.sqlite3-journal
+
+# Environment variables & secrets (Never commit secrets to git)
+.env
+.env.*
+.env.local
+!.env.example
+
+# Static & Media directories
+/static/
+/staticfiles/
+/media/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# OS / Editor specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*.log
+
+# Testing & coverage
+.coverage
+htmlcov/
+.pytest_cache/
+

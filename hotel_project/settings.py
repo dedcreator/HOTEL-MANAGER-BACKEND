@@ -1,17 +1,27 @@
-# backend/hotel_project/settings.py
-
 import os
 from pathlib import Path
-from decouple import config
+
+try:
+    from decouple import config
+except ImportError:
+    def config(key, default=None, cast=None):
+        val = os.environ.get(key, default)
+        if cast and val is not None:
+            if cast == bool:
+                return str(val).lower() in ('1', 'true', 'yes')
+            return cast(val)
+        return val
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = config('SECRET_KEY', default='django-insecure-your-secret-key-here')
+SECRET_KEY = config('SECRET_KEY', default='django-insecure-tsg-hotel-secret-key-prod-change-me')
 
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-# This is fine - keeps your existing ALLOWED_HOSTS
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1').split(',')
+# ALLOWED_HOSTS - Safe defaults for local dev and PythonAnywhere
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*').split(',')
+if '*' not in ALLOWED_HOSTS and 'testserver' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.extend(['testserver', 'localhost', '127.0.0.1'])
 
 # Application definition
 INSTALLED_APPS = [
@@ -37,6 +47,7 @@ INSTALLED_APPS = [
     'sales',
     'reports',
     'consumables',
+    'menu',
 ]
 
 # MIDDLEWARE - CorsMiddleware MUST be at the very top
@@ -103,9 +114,13 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# Static files
-STATIC_URL = 'static/'
+# Static files (CSS, JavaScript, Images)
+STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# Media files (User uploads)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -153,10 +168,19 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
 }
 
-# ====== CORS SETTINGS - ADD THESE AT THE BOTTOM ======
+# ====== CORS SETTINGS ======
+CORS_ALLOW_ALL_ORIGINS = True  # Enable for smooth multi-app local and network development
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://localhost:3003",
+    "http://localhost:5173",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
+    "http://127.0.0.1:3003",
+    "http://127.0.0.1:5173",
     "http://172.20.10.4:3000",
 ]
 
@@ -183,28 +207,39 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
 ]
 
-# For development only - you can temporarily enable this
-# CORS_ALLOW_ALL_ORIGINS = True
-
-# Disable authentication for these specific paths
-import re
+# Disable authentication for public endpoints
 class DisableAuthForPublicPaths:
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        if request.path.startswith('/api/bookings/public/'):
-            # Mock authentication
-            from django.contrib.auth.models import AnonymousUser
-            request.user = AnonymousUser()
+        public_prefixes = (
+            '/api/bookings/public/',
+            '/api/menu/public/',
+            '/api/tables/public/',
+            '/api/menu/orders/',
+        )
+        if any(request.path.startswith(prefix) for prefix in public_prefixes):
+            # If not already authenticated, treat as AnonymousUser
+            if not hasattr(request, 'user') or not request.user or not request.user.is_authenticated:
+                from django.contrib.auth.models import AnonymousUser
+                request.user = AnonymousUser()
         return self.get_response(request)
 
 MIDDLEWARE.append('hotel_project.settings.DisableAuthForPublicPaths')
 
-# CSRF Trusted Origins (sometimes needed)
+# CSRF Trusted Origins
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://localhost:3003",
+    "http://localhost:5173",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
+    "http://127.0.0.1:3003",
+    "http://127.0.0.1:5173",
     "http://172.20.10.4:3000",
 ]
 
