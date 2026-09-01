@@ -14,7 +14,7 @@ class SaleItemSerializer(serializers.ModelSerializer):
 
 class SaleSerializer(serializers.ModelSerializer):
     items = serializers.SerializerMethodField()
-    staff_name = serializers.CharField(source='staff.username', read_only=True)
+    staff_name = serializers.SerializerMethodField()
     room_number = serializers.CharField(source='room.room_number', read_only=True)
     
     class Meta:
@@ -25,6 +25,12 @@ class SaleSerializer(serializers.ModelSerializer):
     def get_items(self, obj):
         items = obj.items.all()
         return SaleItemSerializer(items, many=True).data
+
+    def get_staff_name(self, obj):
+        if obj.staff:
+            full = f"{obj.staff.first_name} {obj.staff.last_name}".strip()
+            return full if full else obj.staff.username
+        return "Staff"
 
 class CreateSaleSerializer(serializers.Serializer):
     guest_name = serializers.CharField(required=False, allow_blank=True, default="Walk-in Guest")
