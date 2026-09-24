@@ -24,7 +24,7 @@ def public_booking(request):
         data = request.data
         
         # Validate required fields
-        required_fields = ['name', 'email', 'phone', 'roomType', 'checkIn', 'checkOut']
+        required_fields = ['name', 'roomType', 'checkIn', 'checkOut']
         for field in required_fields:
             if not data.get(field):
                 return Response(
@@ -37,12 +37,12 @@ def public_booking(request):
         first_name = name_parts[0] if name_parts else 'Guest'
         last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else 'Visitor'
         
-        # Create guest
+        # Create guest (email and phone optional)
         guest = Guest.objects.create(
             first_name=first_name,
             last_name=last_name,
-            email=data.get('email'),
-            phone=data.get('phone'),
+            email=data.get('email', '') or '',
+            phone=data.get('phone', '') or '',
         )
         
         # Parse dates

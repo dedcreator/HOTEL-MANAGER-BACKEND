@@ -6,6 +6,9 @@ from rooms.serializers import RoomSerializer
 
 class GuestSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
+    last_name = serializers.CharField(required=False, allow_blank=True, default='')
+    email = serializers.EmailField(required=False, allow_blank=True, default='')
+    phone = serializers.CharField(required=False, allow_blank=True, default='')
     
     class Meta:
         model = Guest
@@ -13,7 +16,8 @@ class GuestSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
     
     def get_full_name(self, obj):
-        return f"{obj.first_name} {obj.last_name}"
+        name = f"{obj.first_name} {obj.last_name}".strip()
+        return name if name else "Guest"
 
 class BookingSerializer(serializers.ModelSerializer):
     guest_details = GuestSerializer(source='guest', read_only=True)

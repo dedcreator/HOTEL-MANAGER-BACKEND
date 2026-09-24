@@ -8,15 +8,16 @@ from rooms.models import Room
 class Guest(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
-    email = models.EmailField()
-    phone = models.CharField(max_length=20)
+    last_name = models.CharField(max_length=100, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
+    phone = models.CharField(max_length=20, blank=True, default='')
     id_number = models.CharField(max_length=50, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
-        return f"{self.first_name} {self.last_name}"
+        name = f"{self.first_name} {self.last_name}".strip()
+        return name if name else "Guest"
     
     class Meta:
         ordering = ['-created_at']

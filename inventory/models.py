@@ -47,11 +47,11 @@ class Product(models.Model):
     is_premium = models.BooleanField(default=False, help_text="Premium lounge item")
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name = models.CharField(max_length=200, unique=True)
+    name = models.CharField(max_length=200)
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other')
     default_price = models.DecimalField(max_digits=10, decimal_places=2)
     unit = models.CharField(max_length=20, choices=UNIT_CHOICES, default='unit')
-    barcode = models.CharField(max_length=100, unique=True, blank=True, null=True)
+    barcode = models.CharField(max_length=100, blank=True, null=True)
     total_stock = models.IntegerField(default=0)
     min_stock_level = models.IntegerField(default=10)
     is_active = models.BooleanField(default=True)
@@ -66,9 +66,22 @@ class Product(models.Model):
     
     class Meta:
         ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['name'],
+                condition=models.Q(is_active=True),
+                name='unique_active_product_name'
+            ),
+            models.UniqueConstraint(
+                fields=['barcode'],
+                condition=models.Q(is_active=True, barcode__isnull=False),
+                name='unique_active_product_barcode'
+            ),
+        ]
     
     def __str__(self):
-        return f"{self.name} - ₦{self.default_price}"
+        clean_name = self.name.split('__deleted_')[0] if '__deleted_' in self.name else self.name
+        return f"{clean_name} - ₦{self.default_price}"
     
     @property
     def is_low_stock(self):

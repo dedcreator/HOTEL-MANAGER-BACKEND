@@ -18,7 +18,7 @@ def create_booking(request):
         data = json.loads(request.body)
         
         # Validate required fields
-        required = ['name', 'email', 'phone', 'roomType', 'checkIn', 'checkOut']
+        required = ['name', 'roomType', 'checkIn', 'checkOut']
         for field in required:
             if not data.get(field):
                 return JsonResponse({'error': f'{field} is required'}, status=400)
@@ -79,14 +79,33 @@ def create_booking(request):
                 )
 
             # Create or update guest
-            guest, _ = Guest.objects.get_or_create(
-                email=data['email'].strip().lower(),
-                defaults={
-                    'first_name': first_name,
-                    'last_name': last_name,
-                    'phone': data['phone'].strip(),
-                }
-            )
+            email = str(data.get('email', '') or '').strip().lower()
+            phone = str(data.get('phone', '') or '').strip()
+            if email:
+                guest, _ = Guest.objects.get_or_create(
+                    email=email,
+                    defaults={
+                        'first_name': first_name,
+                        'last_name': last_name,
+                        'phone': phone,
+                    }
+                )
+            elif phone:
+                guest, _ = Guest.objects.get_or_create(
+                    phone=phone,
+                    defaults={
+                        'first_name': first_name,
+                        'last_name': last_name,
+                        'email': '',
+                    }
+                )
+            else:
+                guest = Guest.objects.create(
+                    first_name=first_name,
+                    last_name=last_name,
+                    email='',
+                    phone='',
+                )
 
             # Calculate total amount
             total_amount = data.get('totalAmount')

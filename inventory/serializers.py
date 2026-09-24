@@ -21,14 +21,34 @@ class ProductSerializer(serializers.ModelSerializer):
             return request.user.role == 'ceo'
         return False
     
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Strip any deleted marker for display purposes
+        if data.get('name') and '__deleted_' in data['name']:
+            data['name'] = data['name'].split('__deleted_')[0]
+        if data.get('barcode') and '__deleted_' in data['barcode']:
+            data['barcode'] = data['barcode'].split('__deleted_')[0]
+        return data
+
     def validate_name(self, value):
+        name_clean = value.strip()
+        qs = Product.objects.filter(name__iexact=name_clean, is_active=True)
         if self.instance:
-            if Product.objects.filter(name__iexact=value).exclude(id=self.instance.id).exists():
-                raise serializers.ValidationError("A product with this name already exists")
-        else:
-            if Product.objects.filter(name__iexact=value).exists():
-                raise serializers.ValidationError("A product with this name already exists")
-        return value
+            qs = qs.exclude(id=self.instance.id)
+        if qs.exists():
+            raise serializers.ValidationError("An active product with this name already exists")
+        return name_clean
+
+    def validate_barcode(self, value):
+        if not value:
+            return value
+        barcode_clean = value.strip()
+        qs = Product.objects.filter(barcode=barcode_clean, is_active=True)
+        if self.instance:
+            qs = qs.exclude(id=self.instance.id)
+        if qs.exists():
+            raise serializers.ValidationError("An active product with this barcode already exists")
+        return barcode_clean
 
 
 class BatchSerializer(serializers.ModelSerializer):

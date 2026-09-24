@@ -32,10 +32,44 @@ class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     
     def perform_destroy(self, instance):
-        # Soft delete - just mark as inactive
-        instance.is_active = False
-        instance.save()
+        # Check if the product has historical relations
+        has_relations = (
+            (hasattr(instance, 'saleitem_set') and instance.saleitem_set.exists()) or
+            (hasattr(instance, 'batches') and instance.batches.exists()) or
+            (hasattr(instance, 'movements') and instance.movements.exists())
+        )
+        if not has_relations:
+            # If no history exists, hard delete completely
+            instance.delete()
+        else:
+            # Soft delete and free up the name/barcode for new items
+            import time
+            suffix = f"__deleted_{int(time.time())}"
+            instance.is_active = False
+            instance.name = f"{instance.name}{suffix}"
+            if instance.barcode:
+                instance.barcode = f"{instance.barcode}{suffix}"
+            instance.save()
     
+    def create(self, request, *args, **kwargs):
+        # Free up any legacy inactive products that still hold this name or barcode
+        import time
+        name = str(request.data.get('name', '')).strip()
+        barcode = str(request.data.get('barcode', '')).strip()
+        if name:
+            for p in Product.objects.filter(name__iexact=name, is_active=False):
+                suffix = f"__deleted_{int(time.time())}"
+                p.name = f"{p.name}{suffix}"
+                if p.barcode:
+                    p.barcode = f"{p.barcode}{suffix}"
+                p.save()
+        if barcode:
+            for p in Product.objects.filter(barcode=barcode, is_active=False):
+                suffix = f"__deleted_{int(time.time())}"
+                p.barcode = f"{p.barcode}{suffix}"
+                p.save()
+        return super().create(request, *args, **kwargs)
+
     def destroy(self, request, *args, **kwargs):
         """Override destroy to return proper response and only CEO can delete"""
         instance = self.get_object()
