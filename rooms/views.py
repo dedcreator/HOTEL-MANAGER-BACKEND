@@ -20,6 +20,16 @@ class RoomViewSet(viewsets.ModelViewSet):
     queryset = Room.objects.all().order_by('room_number')
     serializer_class = RoomSerializer
     
+    def perform_destroy(self, instance):
+        # Save snapshot for all bookings referencing this room so their records stay 100% intact
+        for b in instance.bookings.all():
+            if not b.room_number_snapshot:
+                b.room_number_snapshot = instance.room_number
+            if not b.room_type_snapshot:
+                b.room_type_snapshot = instance.room_type
+            b.save(update_fields=['room_number_snapshot', 'room_type_snapshot'])
+        instance.delete()
+    
     @action(detail=True, methods=['post'])
     def change_status(self, request, pk=None):
         room = self.get_object()

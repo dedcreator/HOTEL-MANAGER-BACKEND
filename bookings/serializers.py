@@ -31,10 +31,28 @@ class BookingSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'booking_reference', 'created_at', 'updated_at', 'checked_in_at', 'checked_out_at']
     
     def get_guest_name(self, obj):
-        return f"{obj.guest.first_name} {obj.guest.last_name}"
+        if obj.guest:
+            name = f"{obj.guest.first_name} {obj.guest.last_name}".strip()
+            return name if name else "Guest"
+        return "Guest"
     
     def get_room_number(self, obj):
-        return obj.room.room_number
+        if obj.room:
+            return obj.room.room_number
+        return obj.room_number_snapshot or "Archived Room"
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not data.get('room_details'):
+            data['room_details'] = {
+                'id': None,
+                'room_number': instance.room_number_snapshot or 'Archived Room',
+                'room_type': instance.room_type_snapshot or 'standard',
+                'base_price': 0,
+                'status': 'deleted',
+                'is_deleted': True,
+            }
+        return data
 
 
 class CreateBookingSerializer(serializers.ModelSerializer):

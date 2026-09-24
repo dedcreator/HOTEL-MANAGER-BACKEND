@@ -39,7 +39,9 @@ class Booking(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     booking_reference = models.CharField(max_length=50, unique=True, blank=True)
     guest = models.ForeignKey(Guest, on_delete=models.PROTECT, related_name='bookings')
-    room = models.ForeignKey(Room, on_delete=models.PROTECT, related_name='bookings')
+    room = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, related_name='bookings')
+    room_number_snapshot = models.CharField(max_length=50, blank=True, default='')
+    room_type_snapshot = models.CharField(max_length=50, blank=True, default='')
     check_in = models.DateField()
     check_out = models.DateField()
     adults = models.IntegerField(default=1, validators=[MinValueValidator(1)])
@@ -82,6 +84,12 @@ class Booking(models.Model):
                 new_num = 1
             
             self.booking_reference = f"BK-{year}-{new_num:04d}"
+        
+        if self.room:
+            if not self.room_number_snapshot:
+                self.room_number_snapshot = self.room.room_number
+            if not self.room_type_snapshot:
+                self.room_type_snapshot = self.room.room_type
         
         super().save(*args, **kwargs)
     
