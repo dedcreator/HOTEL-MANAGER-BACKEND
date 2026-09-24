@@ -51,8 +51,8 @@ class RoomViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(available_rooms, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['get', 'post', 'patch'], permission_classes=[IsAuthenticated])
-    def settings(self, request):
+    @action(detail=False, methods=['get', 'post', 'patch'], url_path='settings', url_name='settings', permission_classes=[IsAuthenticated])
+    def room_settings(self, request):
         """Get or update room settings (Manager & CEO)"""
         settings_obj = RoomSettings.get_settings()
         
